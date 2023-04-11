@@ -1,0 +1,89 @@
+service: fruitify-api
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: java11
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "dynamodb:*"
+            - "sns:*"
+          Resource: "*"
+
+package:
+  artifact: target/${self:service}-${self:provider.stage}.jar
+
+functions:
+  listFruits:
+    handler: com.serverless.handlers.ListFruitsHandler
+    events:
+      - http:
+          path: /fruits
+          method: post
+
+  subscribeEmailToSnsTopic:
+    handler: com.serverless.handlers.SubscribeToSnsTopicHandler
+    events:
+      - http:
+          path: /sns/{email}
+          method: get
+    environment:
+      TOPIC_ARN: !Ref SuperTopic
+
+  createFruit:
+    handler: com.serverless.handlers.CreateFruitHandler
+    environment:
+      TOPIC_ARN: !Ref SuperTopic
+      OPERATIONS_EMAIL: TEST_EMAIL@EMAIL.COM
+    events:
+      - http:
+          path: /fruits/create
+          method: post
+      - sns:
+          arn: !Ref SuperTopic
+          topicName: FruitNotificationTopic
+          displayName: Email notification pipeline
+
+resources:
+  Resources:
+    fruitsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: fruits_table
+        AttributeDefinitions:
+          - AttributeName: name
+            AttributeType: S
+          - AttributeName: price
+            AttributeType: N
+          - AttributeName: foodType
+            AttributeType: S
+        KeySchema:
+          - AttributeName: name
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        GlobalSecondaryIndexes:
+          - IndexName: PriceIndex
+            KeySchema:
+              - AttributeName: foodType
+                KeyType: HASH
+              - AttributeName: price
+                KeyType: RANGE
+            Projection:
+              ProjectionType: 'ALL'
+            ProvisionedThroughput:
+              ReadCapacityUnits: '5'
+              WriteCapacityUnits: '5'
+
+    SuperTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: FruitNotificationTopic
